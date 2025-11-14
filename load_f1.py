@@ -5,9 +5,7 @@ import sqlite3
 
 BASE = "https://api.openf1.org/v1"
 
-# -------------------------------------------------------
 # Safe fetch function (handles 429 rate limits)
-# -------------------------------------------------------
 def fetch(endpoint, params=None, max_retries=5):
     for attempt in range(max_retries):
         try:
@@ -15,7 +13,7 @@ def fetch(endpoint, params=None, max_retries=5):
 
             if r.status_code == 429:
                 wait = 2 ** attempt
-                print(f"⚠️ 429 Too Many Requests → waiting {wait}s...")
+                print(f"!! 429 Too Many Requests → waiting {wait}s...")
                 time.sleep(wait)
                 continue
 
@@ -24,15 +22,14 @@ def fetch(endpoint, params=None, max_retries=5):
 
         except Exception as e:
             wait = 2 ** attempt
-            print(f"⚠️ Error: {e} → retrying in {wait}s...")
+            print(f"Error: {e} → retrying in {wait}s...")
             time.sleep(wait)
 
-    raise Exception(f"❌ Failed to fetch {endpoint} after retries.")
+    raise Exception(f"Failed to fetch {endpoint} after retries.")
 
 
-# -------------------------------------------------------
 # 1. Load ALL meetings (year filter kept but variable renamed)
-# -------------------------------------------------------
+ 
 meetings = fetch("meetings")
 ###change year filter here!!!
 filtered_meetings = meetings[meetings["year"] >= 2023].reset_index(drop=True)
@@ -42,9 +39,7 @@ print("Meetings:", filtered_meetings.shape)
 meeting_keys = filtered_meetings["meeting_key"].unique()
 
 
-# -------------------------------------------------------
 # 2. Load ALL Race sessions for these meetings
-# -------------------------------------------------------
 sessions = fetch("sessions")
 filtered_sessions = sessions[
     (sessions["meeting_key"].isin(meeting_keys)) &
@@ -103,9 +98,7 @@ for sk in session_keys:
         all_weather.append(df)
 
 
-# -------------------------------------------------------
 # 4. Combine all tables
-# -------------------------------------------------------
 results = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
 pitstops = pd.concat(all_pit, ignore_index=True) if all_pit else pd.DataFrame()
 stints = pd.concat(all_stints, ignore_index=True) if all_stints else pd.DataFrame()
@@ -118,9 +111,7 @@ drivers = fetch("drivers")
 drivers = drivers[drivers["session_key"].isin(session_keys)].reset_index(drop=True)
 
 
-# -------------------------------------------------------
 # 5. Save into a SQLite database
-# -------------------------------------------------------
 DB_PATH = "f1_data.db"
 conn = sqlite3.connect(DB_PATH)
 
@@ -141,12 +132,10 @@ drivers.to_sql("drivers", conn, if_exists="replace", index=False)
 
 conn.close()
 
-print("\n✅ DATABASE SAVED:", DB_PATH)
+print("\n DATABASE SAVED:", DB_PATH)
 
 
-# -------------------------------------------------------
 # Summary
-# -------------------------------------------------------
 print("\n========== FINAL SUMMARY ==========")
 print("Meetings:", filtered_meetings.shape)
 print("Sessions:", filtered_sessions.shape)
