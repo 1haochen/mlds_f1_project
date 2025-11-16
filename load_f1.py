@@ -135,7 +135,7 @@ for sk in tqdm(qual_session_keys, desc="Fetching quali grid", unit="session"):
 
 # By default date_start is null for lap 1, here we fill it with the earliest lap2 start time.
 for l in all_laps:
-    l["date_start"] = pd.to_datetime(l["date_start"], format="ISO8601", utc=True)
+    l["date_start"] =  pd.to_datetime(l["date_start"], utc=True, errors="coerce")
 
     # Fix missing date_start for lap 1
     min_ts = l["date_start"].dropna().min()
@@ -603,3 +603,6 @@ race_control_clean.to_sql("race_control", conn, if_exists="append", index=False)
 grids_clean.to_sql("grids", conn, if_exists="append", index=False)
 position_clean.to_sql("position", conn, if_exists="append", index=False)
 
+conn.close()
+
+print("f1_data.db created successfully and all tables loaded.")
