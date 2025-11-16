@@ -1,5 +1,6 @@
 import sqlite3
 import pandas as pd
+import numpy as np
 conn = sqlite3.connect("f1_data.db")
 
 race_sessions = pd.read_sql("""
@@ -112,6 +113,11 @@ for session_key in keys:
                 (laps.lap_number <= tyre_change_lap + 5)
             ]["lap_duration"].mean()
 
+            Abnormal = False
+            for ll in range(int(new["lap_start"]), int(new["lap_end"])):
+                if np.abs(laps[(laps.driver_number == driver) & (laps.lap_number == ll)]["lap_duration"].values) > 200:
+                    Abnormal = True
+
             lap_time_change = None
             if pd.notnull(before_laps) and pd.notnull(after_laps):
                 lap_time_change = after_laps - before_laps
@@ -129,6 +135,7 @@ for session_key in keys:
                 "pos_after": pos_after,
                 "position_change": None if (pos_before is None or pos_after is None)
                                         else pos_after - pos_before,
+                "Abnormal": Abnormal,
                 "lap_time_change": lap_time_change
             })
     summary = pd.DataFrame(change_records)
