@@ -1,4 +1,40 @@
-.Rproj.user
+# R & RStudio files
 .Rhistory
 .RData
 .Ruserdata
+.Rproj.user/
+
+# Shiny runtime logs
+.Rprofile
+.Rapp.history
+.Rproj.user/
+.Rproj.user/*
+
+# Project environment
+.Renviron
+.Rproj.user
+.Rproj.user/*
+.RDataTmp
+
+# CSVs / data exports
+*.csv
+*.tsv
+*.xlsx
+*.db
+*.rds
+
+# Cache / temporary
+*.log
+*.tmp
+*.bak
+.DS_Store
+*.zip
+*.tar.gz
+
+# Python notebooks or temp files (if mixed project)
+*.ipynb_checkpoints/
+__pycache__/
+
+# Large data subsets
+f1_master_df.csv
+f1_shiny_subset.csv
