@@ -398,10 +398,21 @@ cur.execute("PRAGMA foreign_keys = ON;")
 
 # DROP existing tables (optional clean start)
 tables = [
-    "circuits", "race_sessions", "teams", "team_seasons",
-    "drivers_identity", "driver_sessions",
-    "results", "pitstops", "stints", "laps",
-    "weather", "race_control", "grids", "position"
+    "position",
+    "grids",
+    "race_control",
+    "weather",
+    "laps",
+    "stints",
+    "pitstops",
+    "results",
+    "driver_sessions",
+    "drivers_identity",
+    "team_seasons",
+    "teams",
+    "race_sessions",
+    "circuits", 
+    "tyre_changes"
 ]
 
 for t in tables:
