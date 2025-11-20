@@ -59,6 +59,8 @@ session_keys = filtered_sessions["session_key"].unique()
 all_results, all_pit, all_stints, all_laps = [], [], [], []
 all_rc, all_weather = [], []
 all_grid = []
+all_position = []
+
 
 print(f"\nLoading data for {len(session_keys)} race sessions...")
 for sk in tqdm(session_keys, desc="Fetching session data", unit="session"):
@@ -106,6 +108,13 @@ for sk in tqdm(session_keys, desc="Fetching session data", unit="session"):
         df["session_key"] = sk
         all_weather.append(df)
 
+    # Position
+    df = fetch("position", {"session_key": sk})
+    if not df.empty:
+        df["session_key"] = sk
+        all_position.append(df)
+
+
 # extracting grid (start) position data, stored in qualifying sessions
 qual_sessions = sessions[
     (sessions["meeting_key"].isin(meeting_keys)) &
@@ -123,6 +132,19 @@ for sk in tqdm(qual_session_keys, desc="Fetching quali grid", unit="session"):
         df["session_key"] = sk
         all_grid.append(df)
 
+
+# By default date_start is null for lap 1, here we fill it with the earliest lap2 start time.
+for l in all_laps:
+    l["date_start"] =  pd.to_datetime(l["date_start"], utc=True, errors="coerce")
+
+    # Fix missing date_start for lap 1
+    min_ts = l["date_start"].dropna().min()
+
+    l.loc[
+        (l["lap_number"] == 1) & (l["date_start"].isna()),
+        "date_start"
+    ] = min_ts
+
 # 4. Combine all tables
 results = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
 pitstops = pd.concat(all_pit, ignore_index=True) if all_pit else pd.DataFrame()
@@ -131,6 +153,8 @@ laps = pd.concat(all_laps, ignore_index=True) if all_laps else pd.DataFrame()
 race_control = pd.concat(all_rc, ignore_index=True) if all_rc else pd.DataFrame()
 weather = pd.concat(all_weather, ignore_index=True) if all_weather else pd.DataFrame()
 grid = pd.concat(all_grid, ignore_index=True) if all_grid else pd.DataFrame()
+position = pd.concat(all_position, ignore_index=True) if all_position else pd.DataFrame()
+
 # Drivers metadata
 drivers = fetch("drivers")
 drivers = drivers[drivers["session_key"].isin(session_keys)].reset_index(drop=True)
@@ -283,6 +307,7 @@ weather_clean = weather.drop(columns=["meeting_key"])
 # race_control data cleaning, remove meeting_key
 race_control_clean = race_control.drop(columns=["meeting_key"])
 
+
 # [7. Clean results data] - for ending positions
 # convert position, number of laps, points to integer
 results["position"] = pd.to_numeric(results["position"], errors="coerce").astype("Int64")
@@ -313,6 +338,9 @@ stints_clean = stints.drop(columns=["meeting_key"])
 
 # [10. Clean laps data]
 laps_clean = laps.drop(columns=["meeting_key"])
+
+# Clean position data
+position_clean = position.drop(columns=["meeting_key"])
 
 # [11. Clean grids data] - for starting positions
 
@@ -355,6 +383,7 @@ print("stints:", stints_clean.shape)
 print("laps:", laps_clean.shape)
 print("weather:", weather_clean.shape)
 print("race_control:", race_control_clean.shape)
+print("position:", position_clean.shape)
 print("grids:", grids_clean.shape)
 
 # -----------------------------
@@ -369,10 +398,21 @@ cur.execute("PRAGMA foreign_keys = ON;")
 
 # DROP existing tables (optional clean start)
 tables = [
-    "circuits", "race_sessions", "teams", "team_seasons",
-    "drivers_identity", "driver_sessions",
-    "results", "pitstops", "stints", "laps",
-    "weather", "race_control", "grids"
+    "position",
+    "grids",
+    "race_control",
+    "weather",
+    "laps",
+    "stints",
+    "pitstops",
+    "results",
+    "driver_sessions",
+    "drivers_identity",
+    "team_seasons",
+    "teams",
+    "race_sessions",
+    "circuits", 
+    "tyre_changes"
 ]
 
 for t in tables:
@@ -539,6 +579,16 @@ CREATE TABLE grids (
 );
 """)
 
+cur.execute("""
+CREATE TABLE position (
+    date TEXT,
+    session_key INTEGER,
+    driver_number INTEGER,
+    position INTEGER,
+    FOREIGN KEY (session_key) REFERENCES race_sessions(session_key)
+);
+""")
+
 conn.commit()
 
 # CLEAN: Convert list-type columns into strings for SQLite
@@ -562,8 +612,8 @@ laps_clean.to_sql("laps", conn, if_exists="append", index=False)
 weather_clean.to_sql("weather", conn, if_exists="append", index=False)
 race_control_clean.to_sql("race_control", conn, if_exists="append", index=False)
 grids_clean.to_sql("grids", conn, if_exists="append", index=False)
+position_clean.to_sql("position", conn, if_exists="append", index=False)
 
-conn.commit()
 conn.close()
 
 print("f1_data.db created successfully and all tables loaded.")
