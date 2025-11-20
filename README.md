@@ -1,83 +1,54 @@
-# mlds_f1_project
-
-Here is a **clean, simple, beginner-friendly README.md** for your entire Docker + Airflow + F1 ETL pipeline.
-It tells the user:
-
-* What this project does
-* How to install
-* How to run
-* How to update
-* How the DAG works
-* What each script does
-
-It’s short, clear, and usable by anyone.
-
----
-
-# ✅ **README.md (Simple & Clean)**
-
-You can copy-paste this into your repo.
-
----
-
 # **F1 ETL Pipeline — Airflow + Docker**
 
-This project builds a **fully automated ETL pipeline** for Formula 1 race data using:
+This project builds a **fully automated ETL pipeline** for Formula 1 race data (from https://openf1.org/) using:
 
 * Docker
 * Apache Airflow
 * SQLite
 * OpenF1 API
-* Python ETL scripts
-* Tyre-change feature engineering
+* Python ETL modules
+* Tyre-strategy feature engineering
 * (Optional) Streamlit dashboard
 
-The Airflow DAG automatically decides whether to run a **full load** or an **incremental update**, computes tyre strategies, and runs your processing script.
+The Airflow DAG automatically triggers a **full load** on first run or an **incremental update** on subsequent runs, computes tyre-strategy features, and runs your processing/dashboard script.
 
 ---
 
-## 🚀 **1. Project Overview**
+# 🚀 **1. Project Overview**
 
-This pipeline automatically:
+The system automates:
 
 ### **ETL**
 
-* Loads all F1 data (meetings, sessions, laps, stints, pit stops, weather, etc.)
-* Maps team and driver identity history
-* Builds a clean relational database (`f1_data.db`)
+* Pulls meetings, sessions, results, laps, pit stops, stints, weather, and driver/team identities
+* Normalizes and stores them as a relational SQLite database (`f1_data.db`)
 
 ### **Feature Engineering**
 
-* Computes tyre strategy events
-* Calculates tyre change laps
-* Produces driver-level tyre sequences and performance effects
+* Detects tyre-change events
+* Computes stint sequences, tyre histories, and delta performance indicators
 
-### **Orchestration**
+### **Orchestration (Airflow)**
 
-An Airflow DAG decides:
-
-* **If no database exists → full initial ETL**
-* **If the database already exists → incremental update**
-
-After ETL, Airflow:
-
-1. Computes tyre change features
-2. Runs `app.py` (you can plug analytics or dashboard prep here)
+* Chooses **full ETL** if no DB exists
+* Chooses **incremental update** otherwise
+* Runs tyre-change processing
+* Runs `app.py` (analytics or Streamlit dashboard bootstrap)
 
 ---
 
-## 📦 **2. What’s Inside**
+# 📦 **2. Repository Structure**
 
 ```
 ├── dags/
-│   └── f1_pipeline_dag.py          # Main Airflow pipeline
+│   └── f1_pipeline_dag.py          # Airflow DAG
 ├── scripts/
-│   ├── load_f1_functional.py       # Full initial ETL
+│   ├── load_f1_functional.py       # Initial ETL
 │   ├── update_f1_data.py           # Incremental ETL
 │   ├── create_tyre_changes.py      # Feature engineering
-│   └── app.py                      # Final processing
+│   └── app.py                      # Final processing / Streamlit
 ├── data/
-│   └── f1_data.db                  # Created after ETL
+│   └── f1_data.db                  # Output DB
 ├── docker-compose.yaml
 ├── Dockerfile
 └── README.md
@@ -85,94 +56,128 @@ After ETL, Airflow:
 
 ---
 
-## 🐳 **3. How to Run Everything**
+# 🐳 **3. How to Run Everything**
 
-### **Step 1 — Install Docker Desktop**
+Everything below is the core workflow you follow every time you want to run ETL + feature engineering + dashboard.
 
-Mac / Windows / Linux
+---
+
+## **Step 1 — Install Docker Desktop**
+
 [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
 
 ---
 
-### **Step 2 — Build and Start Airflow**
+## **Step 2 — Build and Start the Airflow Environment**
 
-In the project directory:
+In the project root:
 
 ```bash
 docker-compose down --volumes --remove-orphans
 docker-compose up -d --build
 ```
 
-This will:
+This:
 
-* Build your custom Airflow image
-* Install Python dependencies
-* Mount your scripts/data/dags
-* Start Airflow webserver + scheduler
+* Builds an Airflow image
+* Installs dependencies
+* Mounts `dags/`, `scripts/`, `data/`
+* Starts the Airflow webserver and scheduler
 
 ---
 
-### **Step 3 — Open Airflow UI**
+## **Step 3 — Open Airflow UI**
 
-Visit in browser:
+Browser:
 
 ```
 http://localhost:8080
 ```
 
-Default login:
+Login:
 
 * **user:** airflow
 * **password:** airflow
 
 ---
 
-## ▶ **4. Running the Pipeline**
+## **Step 4 — Trigger the ETL Pipeline**
 
 In Airflow UI:
 
-1. Find DAG **f1_etl_pipeline**
+1. Find **f1_etl_pipeline**
 2. Toggle it **ON**
 3. Click **Trigger DAG**
 
-Airflow will automatically choose:
+### What happens:
 
-### **First run → full ETL**
-
-Creates `data/f1_data.db`.
-
-### **Later runs → incremental update**
-
-Uses your `update_f1_data.py`.
+* **First run** → full ETL creates `f1_data.db`
+* **Later runs** → incremental ETL updates only new sessions
+* Computes tyre-change features
+* Executes your dashboard/script (`app.py`)
 
 ---
 
-## 🔀 **5. How the DAG Works**
+## **Step 5 — View the Streamlit Dashboard (when applicable)**
+
+When your `run_app` step in the airflow is running, to view streamlit dashboard, you can open:
+
 
 ```
-choose_etl_mode (BranchPythonOperator)
-      |
-      ├── run_initial_etl   (if DB missing)
-      └── run_update_etl    (if DB exists)
-                |
-                ▼
-    compute_tyre_changes
-                |
-                ▼
-            run_app
+http://0.0.0.0:8501
 ```
 
-Branch re-joining works using:
+This is where the dashboard or analytics app is displayed.
+
+
+# 🔀 **4. DAG Flow (How It Works Internally)**
+
+```
+choose_etl_mode  (BranchPythonOperator)
+        |
+        ├── run_initial_etl      # if DB missing
+        └── run_update_etl       # if DB exists
+                |
+                ▼
+      compute_tyre_changes
+                |
+                ▼
+             run_app
+```
+
+Branching uses:
 
 ```
 TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
 ```
 
+This ensures both full load and incremental paths rejoin cleanly.
+
 ---
 
-## ⚙️ **6. Common Commands**
+# 📁 **5. Where Data Lives**
 
-### View running Docker containers
+The SQLite DB stays on local machine, NOT inside the container:
+
+Host:
+
+```
+./data/f1_data.db
+```
+
+Inside the container (mounted):
+
+```
+/opt/airflow/data/f1_data.db
+```
+
+Even when rebuilding Docker containers, the database persists.
+
+---
+
+# ⚙️ **6. Helpful Commands**
+
+### See active containers
 
 ```bash
 docker ps
@@ -190,70 +195,9 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-### Enter Airflow container
+### Shell into Airflow container
 
 ```bash
 docker exec -it airflow bash
 ```
 
----
-
-## 📁 **7. Where Data Lives**
-
-Your SQLite database is stored on the host:
-
-```
-./data/f1_data.db
-```
-
-It is mounted inside the container at:
-
-```
-/opt/airflow/data/f1_data.db
-```
-
-So even if you stop/rebuild the container, **your data stays safe**.
-
----
-
-## 📊 **8. Adding a Streamlit Dashboard (Optional)**
-
-If your `app.py` launches Streamlit:
-
-```
-streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0
-```
-
-Expose the port in `docker-compose.yaml`:
-
-```yaml
-ports:
-  - "8501:8501"
-```
-
-Then open:
-
-```
-http://localhost:8501
-```
-
----
-
-## 🎉 **9. You’re Done!**
-
-You now have:
-
-* A reproducible Docker environment
-* A fully automated Airflow ETL pipeline
-* A tyre strategy feature engineering system
-* A persistent SQLite database
-* A clean DAG structure
-
-If you want, I can also generate:
-
-* A pretty architecture diagram
-* A CLI tool for running ETL manually
-* Unit tests for ETL functions
-* A Streamlit dashboard UI
-
-Just tell me!
