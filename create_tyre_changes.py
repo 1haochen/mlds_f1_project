@@ -38,9 +38,12 @@ for session_key in keys:
     laps["lap_duration"] = laps["lap_duration"].astype(float)
 
     laps["date_start"] = pd.to_datetime(laps["date_start"], utc=True, errors="coerce")
-
+    position = position.dropna(subset=["date"])
     position["date"] = pd.to_datetime(position["date"], utc=True, errors="coerce")
-
+    # --- FIX: remove rows with null merge keys ---
+    laps = laps.dropna(subset=["date_start"])
+    position = position.dropna(subset=["date"])
+    
     positions_with_lap = pd.merge_asof(
         laps.sort_values("date_start"),
         position.sort_values("date"),
