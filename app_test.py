@@ -28,8 +28,9 @@ def load_data():
     tyre_changes = safe_read("SELECT * FROM tyre_changes")
     stints = safe_read("SELECT * FROM stints")
     pitstops = safe_read("SELECT * FROM pitstops")
-    drivers = safe_read("SELECT driver_number, full_name, team_name FROM drivers")
-    sessions = safe_read("SELECT session_key, circuit_short_name FROM sessions")
+    drivers = safe_read("SELECT DISTINCT di.driver_id, full_name, team_name FROM  drivers_identity as di Join driver_sessions as ds ON ds.driver_id  = di.driver_id JOIN teams as t ON ds.team_id = t.team_id ORDER BY di.driver_id;")
+    sessions = safe_read("SELECT DISTINCT session_key, circuit_short_name FROM circuits as c JOIN race_sessions as r ON c.circuit_key = r.circuit_key")
+
 
     conn.close()
 
