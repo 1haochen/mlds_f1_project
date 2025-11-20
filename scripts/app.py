@@ -16,6 +16,7 @@ st.set_page_config(page_title="F1 Tyre Strategy Dashboard", layout="wide")
 # --------------------------------------------------
 @st.cache_data
 def load_data():
+    #### NOTICE: make sure the connection is linked to this path
     conn = sqlite3.connect("/opt/airflow/data/f1_data.db")
 
     def safe_read(query):

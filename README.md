@@ -74,7 +74,8 @@ In the project root:
 
 ```bash
 docker-compose down --volumes --remove-orphans
-docker-compose up -d --build
+docker-compose build --no-cache
+docker-compose up
 ```
 
 This:
