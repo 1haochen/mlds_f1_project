@@ -8,7 +8,7 @@ This project builds a **fully automated ETL pipeline** for Formula 1 race data (
 * OpenF1 API
 * Python ETL modules
 * Tyre-strategy feature engineering
-* (Optional) Streamlit dashboard
+* Streamlit dashboard
 
 The Airflow DAG automatically triggers a **full load** on first run or an **incremental update** on subsequent runs, computes tyre-strategy features, and runs your processing/dashboard script.
 
