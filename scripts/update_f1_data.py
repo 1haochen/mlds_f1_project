@@ -14,7 +14,9 @@ from load_f1_functional import (
     transform_data,
 )
 
-DB_PATH = "f1_data.db"
+DB_PATH = "/opt/airflow/data/f1_data.db"
+conn = sqlite3.connect(DB_PATH)
+
 
 
 # 1. Read existing sessions in DB
@@ -216,6 +218,7 @@ def update_f1_data(db_path=DB_PATH, start_year=2023, sleep_sec=0.15):
         append_to_db(conn, transformed)
 
         print("\n Update completed successfully — DB is now up to date!")
+        """
         # NEW: Run create_tyre_changes.py automatically
         print("\n Running create_tyre_changes.py to update tyre-change table...")
 
@@ -228,6 +231,7 @@ def update_f1_data(db_path=DB_PATH, start_year=2023, sleep_sec=0.15):
         except subprocess.CalledProcessError as e:
             print("\n ⚠ ERROR running create_tyre_changes.py:")
             print(e)
+        """
 
     finally:
         conn.close()

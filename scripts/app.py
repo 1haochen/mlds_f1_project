@@ -16,7 +16,7 @@ st.set_page_config(page_title="F1 Tyre Strategy Dashboard", layout="wide")
 # --------------------------------------------------
 @st.cache_data
 def load_data():
-    conn = sqlite3.connect("f1_data.db")
+    conn = sqlite3.connect("/opt/airflow/data/f1_data.db")
 
     def safe_read(query):
         try:
@@ -25,7 +25,6 @@ def load_data():
             st.warning(f"⚠️ Could not load table for query: {query[:30]}... — {e}")
             return pd.DataFrame()
 
-    # Main and lookup tables
     tyre_changes = safe_read("SELECT * FROM tyre_changes")
     stints = safe_read("SELECT * FROM stints")
     pitstops = safe_read("SELECT * FROM pitstops")
@@ -34,50 +33,54 @@ def load_data():
 
     conn.close()
 
-    # --- Column name normalization ---
+    # Normalize column names
     if "driver" in tyre_changes.columns and "driver_number" not in tyre_changes.columns:
         tyre_changes.rename(columns={"driver": "driver_number"}, inplace=True)
 
     if "milliseconds" in pitstops.columns and "pit_duration" not in pitstops.columns:
         pitstops["pit_duration"] = pitstops["milliseconds"] / 1000.0
 
-    # --- Add team info to stints ---
-    if "team_name" not in stints.columns and not drivers.empty:
+    # Merge team info into stints
+    if "driver_number" in stints.columns and "driver_number" in drivers.columns:
         stints = stints.merge(
             drivers[["driver_number", "team_name"]],
             on="driver_number",
             how="left"
         )
 
-    # --- Add circuit info to stints ---
-    if "circuit_short_name" not in stints.columns and not sessions.empty:
+    # Merge circuit info into stints
+    if "session_key" in stints.columns and "session_key" in sessions.columns:
         stints = stints.merge(
             sessions[["session_key", "circuit_short_name"]],
             on="session_key",
             how="left"
         )
 
-    # --- Merge stints info into tyre_changes ---
-    if not stints.empty:
-        join_cols = ["session_key", "driver_number"]
-        join_cols = [c for c in join_cols if c in tyre_changes.columns]
+    # Merge into tyre_changes
+    common_cols = [c for c in ["session_key", "driver_number"] if c in tyre_changes.columns and c in stints.columns]
+    if common_cols:
+        extra_cols = [c for c in ["team_name", "circuit_short_name"] if c in stints.columns]
         tyre_changes = tyre_changes.merge(
-            stints[["session_key", "driver_number", "team_name", "circuit_short_name"]].drop_duplicates(),
-            on=join_cols,
+            stints[common_cols + extra_cols].drop_duplicates(),
+            on=common_cols,
             how="left"
         )
 
-    # --- Merge stints info into pitstops ---
-    if not stints.empty:
-        join_cols = ["session_key", "driver_number"]
-        join_cols = [c for c in join_cols if c in pitstops.columns]
+    # Merge into pitstops
+    common_cols = [c for c in ["session_key", "driver_number"] if c in pitstops.columns and c in stints.columns]
+    if common_cols:
+        extra_cols = [c for c in ["team_name", "circuit_short_name"] if c in stints.columns]
         pitstops = pitstops.merge(
-            stints[["session_key", "driver_number", "team_name", "circuit_short_name"]].drop_duplicates(),
-            on=join_cols,
+            stints[common_cols + extra_cols].drop_duplicates(),
+            on=common_cols,
             how="left"
         )
+
+    # Minimal debug display
+    st.sidebar.write("✅ `stints` columns:", stints.columns.tolist())
 
     return tyre_changes, stints, pitstops
+
 
 
 # ✅ Load data
@@ -344,3 +347,4 @@ elif tabs == "Team Comparison":
 # --------------------------------------------------
 st.markdown("---")
 st.caption("Developed for MLDS F1 Tyre Strategy Project • Data from openf1.org API")
+

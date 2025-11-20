@@ -1,7 +1,9 @@
 import sqlite3
 import pandas as pd
 import numpy as np
-conn = sqlite3.connect("f1_data.db")
+DB_PATH = "/opt/airflow/data/f1_data.db"
+conn = sqlite3.connect(DB_PATH)
+
 
 race_sessions = pd.read_sql("""
         SELECT *

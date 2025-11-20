@@ -645,7 +645,7 @@ def load_data(conn, transformed):
 # MAIN ENTRY POINT
 # -----------------------------
 
-def run_etl(db_path="f1_data.db", start_year=2023, sleep_sec=0.15):
+def run_etl(db_path="/opt/airflow/data/f1_data.db", start_year=2023, sleep_sec=0.15):
     """
     Full ETL: extract from OpenF1, transform, and load into SQLite.
     """
