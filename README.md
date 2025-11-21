@@ -73,9 +73,9 @@ Everything below is the core workflow you follow every time you want to run ETL 
 In the project root:
 
 ```bash
-docker-compose down --volumes --remove-orphans
-docker-compose build --no-cache
-docker-compose up
+docker compose down --volumes --remove-orphans
+docker compose build --no-cache
+docker compose up
 ```
 
 This:
