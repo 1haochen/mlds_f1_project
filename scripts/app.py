@@ -245,7 +245,7 @@ elif tabs == "Opening Tyre vs Δ Position":
             sns.boxplot(data=merged, x="compound", y="position_change", palette="coolwarm")
             plt.title("Opening Tyre Choice vs Δ Position")
             plt.xlabel("Opening Tyre")
-            plt.ylabel("Δ Position (Final - Grid)")
+            plt.ylabel("Δ Position (Final - Grid) sorted by final position")
             st.pyplot(plt)
         else:
             st.info("No Δ position data found for selected filters.")
