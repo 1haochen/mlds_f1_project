@@ -97,8 +97,8 @@ http://localhost:8080
 
 Login:
 
-* **user:** airflow
-* **password:** airflow
+* **user:** admin
+* **password:** admin
 
 ---
 
