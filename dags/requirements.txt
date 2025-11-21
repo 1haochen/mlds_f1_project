@@ -1,0 +1,11 @@
+pandas
+numpy
+requests
+tqdm
+matplotlib
+seaborn
+sqlalchemy
+apache-airflow-providers-http
+apache-airflow-providers-sqlite
+streamlit
+plotly

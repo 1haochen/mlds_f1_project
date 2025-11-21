@@ -1,0 +1,494 @@
+# ===============================================
+# F1 Tyre Strategy & Pit Stop Dashboard (FINAL FIX)
+# ===============================================
+
+import streamlit as st
+import pandas as pd
+import sqlite3
+import plotly.express as px
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+st.set_page_config(page_title="F1 Tyre Strategy Dashboard", layout="wide")
+
+# --------------------------------------------------
+# Load Data (with robust merging)
+# --------------------------------------------------
+@st.cache_data
+def load_data():
+    #### NOTICE: make sure the connection is linked to this path
+    conn = sqlite3.connect("/opt/airflow/data/f1_data.db")
+
+    def safe_read(query):
+        try:
+            return pd.read_sql(query, conn)
+        except Exception as e:
+            st.warning(f"⚠️ Could not load table for query: {query[:30]}... — {e}")
+            return pd.DataFrame()
+
+    tyre_changes = safe_read("SELECT * FROM tyre_changes")
+    stints = safe_read("SELECT s.session_key, s.stint_number, s.driver_number, s.lap_start, s.lap_end, s.compound, s.tyre_age_at_start, ds.team_id, t.team_name FROM stints as s JOIN driver_sessions as ds ON ds.driver_number= s.driver_number AND ds.session_key = s.session_key JOIN teams as t ON ds.team_id = t.team_id;")    
+    pitstops = safe_read("SELECT * FROM pitstops")
+    drivers = safe_read("SELECT DISTINCT di.driver_id, full_name, team_name FROM drivers_identity as di Join driver_sessions as ds ON ds.driver_id  = di.driver_id JOIN teams as t ON ds.team_id = t.team_id ORDER BY di.driver_id;")
+    sessions = safe_read("SELECT DISTINCT session_key, circuit_short_name FROM circuits as c JOIN race_sessions as r ON c.circuit_key = r.circuit_key")
+    weather = safe_read("""
+        SELECT session_key,
+               AVG(wind_speed) AS wind_speed,
+               AVG(rainfall) AS rainfall,
+               AVG(track_temperature) AS track_temperature,
+               AVG(air_temperature) AS air_temperature,
+               AVG(humidity) AS humidity,
+               AVG(pressure) AS pressure
+        FROM weather
+        GROUP BY session_key
+    """)
+    opening = safe_read("""
+        SELECT session_key, driver_number, compound
+        FROM stints
+        WHERE stint_number = 1
+    """)
+    results = pd.read_sql("""
+        SELECT *
+        FROM results
+    """, conn)
+    conn.close()
+
+    # Normalize column names
+    if "driver" in tyre_changes.columns and "driver_number" not in tyre_changes.columns:
+        tyre_changes.rename(columns={"driver": "driver_number"}, inplace=True)
+
+    if "milliseconds" in pitstops.columns and "pit_duration" not in pitstops.columns:
+        pitstops["pit_duration"] = pitstops["milliseconds"] / 1000.0
+
+    # Merge team info into stints
+    if "driver_number" in stints.columns and "driver_number" in drivers.columns:
+        stints = stints.merge(
+            drivers[["driver_number", "team_name"]],
+            on="driver_number",
+            how="left"
+        )
+
+    # Merge circuit info into stints
+    if "session_key" in stints.columns and "session_key" in sessions.columns:
+        stints = stints.merge(
+            sessions[["session_key", "circuit_short_name"]],
+            on="session_key",
+            how="left"
+        )
+
+    # Merge into tyre_changes
+    common_cols = [c for c in ["session_key", "driver_number"] if c in tyre_changes.columns and c in stints.columns]
+    if common_cols:
+        extra_cols = [c for c in ["team_name", "circuit_short_name"] if c in stints.columns]
+        tyre_changes = tyre_changes.merge(
+            stints[common_cols + extra_cols].drop_duplicates(),
+            on=common_cols,
+            how="left"
+        )
+
+    # Merge into pitstops
+    common_cols = [c for c in ["session_key", "driver_number"] if c in pitstops.columns and c in stints.columns]
+    if common_cols:
+        extra_cols = [c for c in ["team_name", "circuit_short_name"] if c in stints.columns]
+        pitstops = pitstops.merge(
+            stints[common_cols + extra_cols].drop_duplicates(),
+            on=common_cols,
+            how="left"
+        )
+
+    # Minimal debug display
+    st.sidebar.write("✅ `stints` columns:", stints.columns.tolist())
+
+    return tyre_changes, stints, pitstops, weather, opening, results
+
+
+
+# ✅ Load data
+tyre_changes, stints, pitstops, weather, opening, results = load_data()
+
+# --------------------------------------------------
+# Sidebar Debug Info
+# --------------------------------------------------
+with st.sidebar.expander("✅ Loaded Data Tables"):
+    st.write({
+        "tyre_changes": list(tyre_changes.columns) if not tyre_changes.empty else "❌ empty",
+        "stints": list(stints.columns) if not stints.empty else "❌ empty",
+        "pitstops": list(pitstops.columns) if not pitstops.empty else "❌ empty",
+    })
+
+# --------------------------------------------------
+# Sidebar Navigation
+# --------------------------------------------------
+st.sidebar.title("🏎️ Dashboard Navigation")
+tabs = st.sidebar.radio(
+    "Select Dashboard Section:",
+    [
+        "Tyre Change Frequency",
+        "Position Change by Strategy",
+        "Opening Tyre vs Δ Position",
+        "Tyre Stint Map",
+        "Pit Stop Insights",
+        "Team Comparison",
+        "Tyre Opening vs Weather"
+    ]
+)
+
+# --------------------------------------------------
+# Independent Filters per Visualization
+# --------------------------------------------------
+def apply_filters(df):
+    sessions = sorted(df["session_key"].dropna().unique()) if "session_key" in df.columns else []
+    teams = sorted(df["team_name"].dropna().unique()) if "team_name" in df.columns else []
+    tracks = sorted(df["circuit_short_name"].dropna().unique()) if "circuit_short_name" in df.columns else []
+
+    selected_session = st.selectbox("Select Session", ["All Sessions"] + list(map(str, sessions)))
+    selected_team = st.selectbox("Select Team", ["All Teams"] + teams)
+    selected_track = st.selectbox("Select Track", ["All Tracks"] + tracks)
+
+    if selected_session != "All Sessions" and "session_key" in df.columns:
+        df = df[df["session_key"].astype(str) == selected_session]
+    if selected_team != "All Teams" and "team_name" in df.columns:
+        df = df[df["team_name"] == selected_team]
+    if selected_track != "All Tracks" and "circuit_short_name" in df.columns:
+        df = df[df["circuit_short_name"] == selected_track]
+
+    return df
+
+
+# --------------------------------------------------
+# TAB 1: Tyre Change Frequency
+# --------------------------------------------------
+if tabs == "Tyre Change Frequency":
+    st.header("🏁 Tyre Change Frequency by Type")
+    filtered = apply_filters(tyre_changes)
+
+    if not filtered.empty and "change_type" in filtered.columns:
+        freq = (
+            filtered.groupby("change_type")
+            .size()
+            .reset_index(name="count")
+            .sort_values("count", ascending=False)
+        )
+
+        fig = px.bar(
+            freq,
+            x="count",
+            y="change_type",
+            orientation="h",
+            title="Frequency of Tyre Compound Changes",
+            color="change_type",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No tyre change data available to plot.")
+
+
+# --------------------------------------------------
+# TAB 2: Position Change by Strategy
+# --------------------------------------------------
+elif tabs == "Position Change by Strategy":
+    st.header("📊 Position Change by Strategy Archetype")
+    filtered = apply_filters(tyre_changes)
+
+    if not filtered.empty and {"change_type", "position_change"} <= set(filtered.columns):
+        
+
+        fig = px.box(
+            filtered,
+            x="change_type",
+            y="position_change",
+            color="change_type",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+            title="Δ Position by Strategy Archetype",
+            labels={
+                "change_type": "Strategy Archetype",
+                "position_change": "Δ Position (Final - Grid)"
+            },
+            points="all"  # Optional: show individual data points
+        )
+
+        # Improve layout (match original style)
+        fig.update_layout(
+            width=1000,
+            height=600,
+            xaxis=dict(tickangle=30),
+            showlegend=False
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Missing required columns for this visualization.")
+
+
+# --------------------------------------------------
+# TAB 3: Opening Tyre vs Δ Position
+# --------------------------------------------------
+# --------------------------------------------------
+# TAB 3: Opening Tyre vs Δ Position (FIXED)
+# --------------------------------------------------
+elif tabs == "Opening Tyre vs Δ Position":
+    st.header("🚦 Opening Tyre Choice vs Δ Position")
+
+    # Use stints instead of tyre_changes
+    filtered = apply_filters(stints)
+
+    if not filtered.empty and "compound" in filtered.columns:
+        # Keep only the first stint per driver (opening tyre)
+        opening_stints = (
+            filtered.sort_values("stint_number")
+            .groupby(["session_key", "driver_number"], as_index=False)
+            .first()
+        )
+
+        # Merge Δ position from tyre_changes (if columns exist)
+        if not tyre_changes.empty and {"driver_number", "position_change"} <= set(tyre_changes.columns):
+            merged = pd.merge(
+                opening_stints,
+                tyre_changes[["driver_number", "session_key", "position_change"]],
+                on=["driver_number", "session_key"],
+                how="left"
+            )
+        else:
+            merged = opening_stints.copy()
+            merged["position_change"] = None
+
+        # Filter to standard dry compounds
+        merged = merged[merged["compound"].isin(["SOFT", "MEDIUM", "HARD"])]
+
+        if merged["position_change"].notna().any():
+            fig = px.box(
+                merged,
+                x="compound",
+                y="position_change",
+                color="compound",
+                color_discrete_map={
+                    "SOFT": "red",
+                    "MEDIUM": "gold",
+                    "HARD": "gray",
+                },
+                title="Opening Tyre Choice vs Δ Position",
+                labels={
+                    "compound": "Opening Tyre",
+                    "position_change": "Δ Position (Final - Grid)"
+                },
+                points="all"  # optional: show all data points
+            )
+
+            fig.update_layout(
+                width=700,
+                height=500,
+                showlegend=False
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No Δ position data found for selected filters.")
+    else:
+        st.warning("`compound` column not found in the stints dataset.")
+
+
+# --------------------------------------------------
+# TAB 4: Tyre Stint Map
+# --------------------------------------------------
+elif tabs == "Tyre Stint Map":
+    st.header("🗺️ Tyre Stint Map by Driver")
+
+    if not stints.empty and "session_key" in stints.columns:
+
+        sessions = sorted(stints["session_key"].dropna().unique())
+        selected_session = st.selectbox("Select Session", sessions)
+
+        # Filter stints for selected session
+        stints_filtered = stints[stints["session_key"] == selected_session]
+
+        # Sort drivers by their final race position (ascending = best)
+        try:
+            results_session = results[results["session_key"] == selected_session].fillna(0).copy()
+            results_session = results_session.sort_values("position", ascending=True)
+            drivers_order = results_session["driver_number"].tolist()
+        except:
+            drivers_order = sorted(stints_filtered["driver_number"].unique())
+
+        # Plotly colors
+        compound_colors = {
+            "SOFT": "red",
+            "MEDIUM": "gold",
+            "HARD": "gray"
+        }
+
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        # Add one horizontal segment per stint
+        for driver_idx, driver in enumerate(drivers_order):
+            drv_stints = stints_filtered[stints_filtered.driver_number == driver]
+
+            for _, row in drv_stints.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[row.lap_start, row.lap_end],
+                    y=[driver_idx, driver_idx],
+                    mode="lines",
+                    line=dict(
+                        color=compound_colors.get(row.compound, "black"),
+                        width=10
+                    ),
+                    name=row.compound,
+                    hovertemplate=(
+                        f"<b>Driver:</b> {driver}<br>"
+                        f"<b>Compound:</b> {row.compound}<br>"
+                        f"<b>Laps:</b> {row.lap_start} → {row.lap_end}<br>"
+                        "<extra></extra>"
+                    ),
+                    showlegend=False  # We'll add manual legend below
+                ))
+
+        # Manual legend using invisible traces
+        for comp, col in compound_colors.items():
+            fig.add_trace(go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line=dict(color=col, width=10),
+                name=comp
+            ))
+
+        fig.update_layout(
+            title=f"Tyre Stint Map (Session {selected_session})",
+            xaxis_title="Lap Number",
+            yaxis=dict(
+                tickmode="array",
+                tickvals=list(range(len(drivers_order))),
+                ticktext=[str(d) for d in drivers_order],
+                title="Driver Number"
+            ),
+            height=600,
+            legend_title="Tyre Compound",
+            margin=dict(l=40, r=40, t=60, b=40)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        st.warning("No stint data found.")
+
+
+
+# --------------------------------------------------
+# TAB 5: Pit Stop Insights
+# --------------------------------------------------
+elif tabs == "Pit Stop Insights":
+    st.header("⏱️ Pit Stop Insights")
+
+    if not pitstops.empty:
+        teams = sorted(pitstops["team_name"].dropna().unique()) if "team_name" in pitstops.columns else []
+        selected_team = st.selectbox("Select Team", ["All Teams"] + teams)
+
+        filtered = pitstops.copy()
+        if selected_team != "All Teams" and "team_name" in filtered.columns:
+            filtered = filtered[filtered["team_name"] == selected_team]
+
+        
+
+        if "pit_duration" in filtered.columns:
+            fig = px.box(
+                filtered[filtered['pit_duration'] < 500],
+                x="team_name",
+                y="pit_duration",
+                color="team_name",
+                title="Pit Stop Duration by Team",
+                color_discrete_sequence=px.colors.qualitative.Pastel,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("`pit_duration` column not found in pitstops table.")
+    else:
+        st.warning("Pit stop data unavailable.")
+
+
+# --------------------------------------------------
+# TAB 6: Team Comparison
+# --------------------------------------------------
+elif tabs == "Team Comparison":
+    st.header("⚔️ Average Position Change Comparison Between Teams")
+    filtered = apply_filters(tyre_changes)
+
+    if not filtered.empty and "team_name" in filtered.columns:
+        teams = sorted(filtered["team_name"].dropna().unique())
+        if len(teams) >= 2:
+            team1 = st.selectbox("Select First Team", teams, index=0)
+            team2 = st.selectbox("Select Second Team", [t for t in teams if t != team1], index=1)
+            df_compare = filtered[filtered["team_name"].isin([team1, team2])]
+
+            avg_change = (
+                df_compare.groupby(["team_name", "change_type"])["position_change"]
+                .mean()
+                .reset_index()
+            )
+
+            fig = px.bar(
+                avg_change,
+                x="change_type",
+                y="position_change",
+                color="team_name",
+                barmode="group",
+                title=f"Average Position Change by Tyre Compound ({team1} vs {team2})",
+                labels={"position_change": "Avg Δ Position", "change_type": "Tyre Change"},
+                color_discrete_sequence=px.colors.qualitative.Vivid,
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Need at least 2 teams in dataset to compare.")
+    else:
+        st.warning("No team data found in dataset.")
+
+# TAB 7: Opening Tyre vs Weather 
+elif tabs == "Tyre Opening vs Weather":
+    st.header("🌤️ Opening Tyre Selection vs Weather Conditions")
+
+    # Only standard dry compounds
+    opening = opening[opening["compound"].isin(["SOFT", "MEDIUM", "HARD"])]
+
+    # Count opening compounds per session
+    counts = opening.groupby(["session_key", "compound"]).size().unstack(fill_value=0)
+    proportions = counts.div(counts.sum(axis=1), axis=0).add_suffix("_pct").reset_index()
+
+    # ---- Merge with weather ----
+    df_weather_tyre = weather.merge(proportions, on="session_key", how="left")
+
+    # ---- Interactive Controls ----
+    weather_cols = ["track_temperature", "air_temperature", "humidity",
+                    "pressure", "wind_speed", "rainfall"]
+
+    x_col = st.selectbox("Select Weather Variable (x-axis):", weather_cols)
+
+    window = st.slider("Smoothing Window (laps)", 1, 15, 5)
+
+    # ---- Prepare Data ----
+    df_sorted = df_weather_tyre.sort_values(x_col).reset_index(drop=True)
+
+    for comp in ["SOFT_pct", "MEDIUM_pct", "HARD_pct"]:
+        df_sorted[f"{comp}_smooth"] = (
+            df_sorted[comp].rolling(window, min_periods=1).mean()
+        )
+
+    # ---- Line Plot ----
+    fig = px.line(
+        df_sorted,
+        x=x_col,
+        y=["SOFT_pct_smooth", "MEDIUM_pct_smooth", "HARD_pct_smooth"],
+        markers=True,
+        labels={"value": "Tyre %", "variable": "Compound"},
+        title=f"Opening Tyre Proportion vs {x_col.replace('_',' ').title()} (Smoothed)"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("Smoothed using rolling mean for clearer trends.")
+# --------------------------------------------------
+# Footer
+# --------------------------------------------------
+st.markdown("---")
+st.caption("Developed for MLDS F1 Tyre Strategy Project • Data from openf1.org API")
