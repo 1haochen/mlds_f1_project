@@ -194,13 +194,29 @@ elif tabs == "Position Change by Strategy":
     if not filtered.empty and {"change_type", "position_change"} <= set(filtered.columns):
         
 
-        plt.figure(figsize=(14, 7))
-        sns.boxplot(data=filtered, x="change_type", y="position_change", palette="Set2")
-        plt.title("Δ Position by Strategy Archetype")
-        plt.ylabel("Δ Position (Final - Grid)")
-        plt.xlabel("Strategy Archetype")
-        plt.xticks(rotation=30)
-        st.pyplot(plt)
+        fig = px.box(
+            filtered,
+            x="change_type",
+            y="position_change",
+            color="change_type",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+            title="Δ Position by Strategy Archetype",
+            labels={
+                "change_type": "Strategy Archetype",
+                "position_change": "Δ Position (Final - Grid)"
+            },
+            points="all"  # Optional: show individual data points
+        )
+
+        # Improve layout (match original style)
+        fig.update_layout(
+            width=1000,
+            height=600,
+            xaxis=dict(tickangle=30),
+            showlegend=False
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Missing required columns for this visualization.")
 
@@ -241,12 +257,31 @@ elif tabs == "Opening Tyre vs Δ Position":
         merged = merged[merged["compound"].isin(["SOFT", "MEDIUM", "HARD"])]
 
         if merged["position_change"].notna().any():
-            plt.figure(figsize=(8, 5))
-            sns.boxplot(data=merged, x="compound", y="position_change", palette="coolwarm")
-            plt.title("Opening Tyre Choice vs Δ Position")
-            plt.xlabel("Opening Tyre")
-            plt.ylabel("Δ Position (Final - Grid) sorted by final position")
-            st.pyplot(plt)
+            fig = px.box(
+                merged,
+                x="compound",
+                y="position_change",
+                color="compound",
+                color_discrete_map={
+                    "SOFT": "red",
+                    "MEDIUM": "gold",
+                    "HARD": "gray",
+                },
+                title="Opening Tyre Choice vs Δ Position",
+                labels={
+                    "compound": "Opening Tyre",
+                    "position_change": "Δ Position (Final - Grid)"
+                },
+                points="all"  # optional: show all data points
+            )
+
+            fig.update_layout(
+                width=700,
+                height=500,
+                showlegend=False
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No Δ position data found for selected filters.")
     else:
@@ -260,40 +295,84 @@ elif tabs == "Tyre Stint Map":
     st.header("🗺️ Tyre Stint Map by Driver")
 
     if not stints.empty and "session_key" in stints.columns:
+
         sessions = sorted(stints["session_key"].dropna().unique())
         selected_session = st.selectbox("Select Session", sessions)
+
+        # Filter stints for selected session
         stints_filtered = stints[stints["session_key"] == selected_session]
 
-        plt.figure(figsize=(14, 8))
-        stints_sorted = stints_filtered.sort_values(["driver_number", "stint_number"])
-        colors = {"SOFT": "red", "MEDIUM": "yellow", "HARD": "gray"}
+        # Sort drivers by their final race position (ascending = best)
+        try:
+            results_session = results[results["session_key"] == selected_session].fillna(0).copy()
+            results_session = results_session.sort_values("position", ascending=True)
+            drivers_order = results_session["driver_number"].tolist()
+        except:
+            drivers_order = sorted(stints_filtered["driver_number"].unique())
 
-        drivers = results[results['session_key'] == selected_session].fillna(20).sort_values("position", ascending = False)['driver_number']
-        for i, driver in enumerate(drivers):
-            drv_stints = stints_sorted[stints_sorted.driver_number == driver]
+        # Plotly colors
+        compound_colors = {
+            "SOFT": "red",
+            "MEDIUM": "gold",
+            "HARD": "gray"
+        }
+
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        # Add one horizontal segment per stint
+        for driver_idx, driver in enumerate(drivers_order):
+            drv_stints = stints_filtered[stints_filtered.driver_number == driver]
+
             for _, row in drv_stints.iterrows():
-                plt.hlines(
-                    y=i,
-                    xmin=row.lap_start,
-                    xmax=row.lap_end,
-                    color=colors.get(row.compound, "black"),
-                    linewidth=10,
-                )
+                fig.add_trace(go.Scatter(
+                    x=[row.lap_start, row.lap_end],
+                    y=[driver_idx, driver_idx],
+                    mode="lines",
+                    line=dict(
+                        color=compound_colors.get(row.compound, "black"),
+                        width=10
+                    ),
+                    name=row.compound,
+                    hovertemplate=(
+                        f"<b>Driver:</b> {driver}<br>"
+                        f"<b>Compound:</b> {row.compound}<br>"
+                        f"<b>Laps:</b> {row.lap_start} → {row.lap_end}<br>"
+                        "<extra></extra>"
+                    ),
+                    showlegend=False  # We'll add manual legend below
+                ))
 
-        plt.yticks(range(len(drivers)), drivers)
-        plt.xlabel("Lap Number")
-        plt.ylabel("Driver Number")
-        plt.title(f"Tyre Stint Map (Session {selected_session})")
-        handles = [
-            plt.Line2D([0], [0], color='red', linewidth=10, label='SOFT'),
-            plt.Line2D([0], [0], color='yellow', linewidth=10, label='MEDIUM'),
-            plt.Line2D([0], [0], color='gray', linewidth=10, label='HARD'),
-        ]
-        plt.legend(loc='lower right', handles=handles, title="Tyre Compound")
+        # Manual legend using invisible traces
+        for comp, col in compound_colors.items():
+            fig.add_trace(go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line=dict(color=col, width=10),
+                name=comp
+            ))
 
-        st.pyplot(plt)
+        fig.update_layout(
+            title=f"Tyre Stint Map (Session {selected_session})",
+            xaxis_title="Lap Number",
+            yaxis=dict(
+                tickmode="array",
+                tickvals=list(range(len(drivers_order))),
+                ticktext=[str(d) for d in drivers_order],
+                title="Driver Number"
+            ),
+            height=600,
+            legend_title="Tyre Compound",
+            margin=dict(l=40, r=40, t=60, b=40)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
     else:
         st.warning("No stint data found.")
+
 
 
 # --------------------------------------------------
