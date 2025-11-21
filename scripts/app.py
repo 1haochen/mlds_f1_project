@@ -47,7 +47,10 @@ def load_data():
         FROM stints
         WHERE stint_number = 1
     """)
-
+    results = pd.read_sql("""
+        SELECT *
+        FROM results
+    """, conn)
     conn.close()
 
     # Normalize column names
@@ -96,12 +99,12 @@ def load_data():
     # Minimal debug display
     st.sidebar.write("✅ `stints` columns:", stints.columns.tolist())
 
-    return tyre_changes, stints, pitstops, weather, opening
+    return tyre_changes, stints, pitstops, weather, opening, results
 
 
 
 # ✅ Load data
-tyre_changes, stints, pitstops, weather, opening = load_data()
+tyre_changes, stints, pitstops, weather, opening, results = load_data()
 
 # --------------------------------------------------
 # Sidebar Debug Info
@@ -265,7 +268,7 @@ elif tabs == "Tyre Stint Map":
         stints_sorted = stints_filtered.sort_values(["driver_number", "stint_number"])
         colors = {"SOFT": "red", "MEDIUM": "yellow", "HARD": "gray"}
 
-        drivers = sorted(stints_sorted["driver_number"].unique())
+        drivers = results[results['session_key'] == selected_session].fillna(20).sort_values("position", ascending = False)['driver_number']
         for i, driver in enumerate(drivers):
             drv_stints = stints_sorted[stints_sorted.driver_number == driver]
             for _, row in drv_stints.iterrows():
@@ -281,6 +284,13 @@ elif tabs == "Tyre Stint Map":
         plt.xlabel("Lap Number")
         plt.ylabel("Driver Number")
         plt.title(f"Tyre Stint Map (Session {selected_session})")
+        handles = [
+            plt.Line2D([0], [0], color='red', linewidth=10, label='SOFT'),
+            plt.Line2D([0], [0], color='yellow', linewidth=10, label='MEDIUM'),
+            plt.Line2D([0], [0], color='gray', linewidth=10, label='HARD'),
+        ]
+        plt.legend(loc='lower right', handles=handles, title="Tyre Compound")
+
         st.pyplot(plt)
     else:
         st.warning("No stint data found.")
