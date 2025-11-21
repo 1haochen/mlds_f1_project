@@ -26,11 +26,26 @@ def load_data():
             return pd.DataFrame()
 
     tyre_changes = safe_read("SELECT * FROM tyre_changes")
-    stints = safe_read("SELECT s.session_key, s.stint_number, s.driver_number, s.lap_start, s.lap_end, s.compound, s.tyre_age_at_start, ds.team_id, t.team_name FROM stints as s JOIN driver_sessions as ds ON ds.driver_number= s.driver_number AND ds.session_key = s.session_key JOIN teams as t ON ds.team_id = t.team_id;")
+    stints = safe_read("SELECT s.session_key, s.stint_number, s.driver_number, s.lap_start, s.lap_end, s.compound, s.tyre_age_at_start, ds.team_id, t.team_name FROM stints as s JOIN driver_sessions as ds ON ds.driver_number= s.driver_number AND ds.session_key = s.session_key JOIN teams as t ON ds.team_id = t.team_id;")    
     pitstops = safe_read("SELECT * FROM pitstops")
-    drivers = safe_read("SELECT DISTINCT di.driver_id, full_name, team_name FROM  drivers_identity as di Join driver_sessions as ds ON ds.driver_id  = di.driver_id JOIN teams as t ON ds.team_id = t.team_id ORDER BY di.driver_id;")
+    drivers = safe_read("SELECT DISTINCT di.driver_id, full_name, team_name FROM drivers_identity as di Join driver_sessions as ds ON ds.driver_id  = di.driver_id JOIN teams as t ON ds.team_id = t.team_id ORDER BY di.driver_id;")
     sessions = safe_read("SELECT DISTINCT session_key, circuit_short_name FROM circuits as c JOIN race_sessions as r ON c.circuit_key = r.circuit_key")
-
+    weather = safe_read("""
+        SELECT session_key,
+               AVG(wind_speed) AS wind_speed,
+               AVG(rainfall) AS rainfall,
+               AVG(track_temperature) AS track_temperature,
+               AVG(air_temperature) AS air_temperature,
+               AVG(humidity) AS humidity,
+               AVG(pressure) AS pressure
+        FROM weather
+        GROUP BY session_key
+    """)
+    opening = safe_read("""
+        SELECT session_key, driver_number, compound
+        FROM stints
+        WHERE stint_number = 1
+    """)
 
     conn.close()
 
@@ -80,12 +95,12 @@ def load_data():
     # Minimal debug display
     st.sidebar.write("✅ `stints` columns:", stints.columns.tolist())
 
-    return tyre_changes, stints, pitstops
+    return tyre_changes, stints, pitstops, weather, opening
 
 
 
 # ✅ Load data
-tyre_changes, stints, pitstops = load_data()
+tyre_changes, stints, pitstops, weather, opening = load_data()
 
 # --------------------------------------------------
 # Sidebar Debug Info
@@ -109,7 +124,8 @@ tabs = st.sidebar.radio(
         "Opening Tyre vs Δ Position",
         "Tyre Stint Map",
         "Pit Stop Insights",
-        "Team Comparison"
+        "Team Comparison",
+        "Tyre Opening vs Weather"
     ]
 )
 
@@ -342,7 +358,49 @@ elif tabs == "Team Comparison":
     else:
         st.warning("No team data found in dataset.")
 
+# TAB 7: Opening Tyre vs Weather 
+elif tabs == "Tyre Opening vs Weather":
+    st.header("🌤️ Opening Tyre Selection vs Weather Conditions")
 
+    # Only standard dry compounds
+    opening = opening[opening["compound"].isin(["SOFT", "MEDIUM", "HARD"])]
+
+    # Count opening compounds per session
+    counts = opening.groupby(["session_key", "compound"]).size().unstack(fill_value=0)
+    proportions = counts.div(counts.sum(axis=1), axis=0).add_suffix("_pct").reset_index()
+
+    # ---- Merge with weather ----
+    df_weather_tyre = weather.merge(proportions, on="session_key", how="left")
+
+    # ---- Interactive Controls ----
+    weather_cols = ["track_temperature", "air_temperature", "humidity",
+                    "pressure", "wind_speed", "rainfall"]
+
+    x_col = st.selectbox("Select Weather Variable (x-axis):", weather_cols)
+
+    window = st.slider("Smoothing Window (laps)", 1, 15, 5)
+
+    # ---- Prepare Data ----
+    df_sorted = df_weather_tyre.sort_values(x_col).reset_index(drop=True)
+
+    for comp in ["SOFT_pct", "MEDIUM_pct", "HARD_pct"]:
+        df_sorted[f"{comp}_smooth"] = (
+            df_sorted[comp].rolling(window, min_periods=1).mean()
+        )
+
+    # ---- Line Plot ----
+    fig = px.line(
+        df_sorted,
+        x=x_col,
+        y=["SOFT_pct_smooth", "MEDIUM_pct_smooth", "HARD_pct_smooth"],
+        markers=True,
+        labels={"value": "Tyre %", "variable": "Compound"},
+        title=f"Opening Tyre Proportion vs {x_col.replace('_',' ').title()} (Smoothed)"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("Smoothed using rolling mean for clearer trends.")
 # --------------------------------------------------
 # Footer
 # --------------------------------------------------
