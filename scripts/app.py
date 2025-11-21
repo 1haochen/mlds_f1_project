@@ -189,9 +189,7 @@ elif tabs == "Position Change by Strategy":
     filtered = apply_filters(tyre_changes)
 
     if not filtered.empty and {"change_type", "position_change"} <= set(filtered.columns):
-        show_winners = st.checkbox("Show Winners Only", value=False)
-        if show_winners and "pos_after" in filtered.columns:
-            filtered = filtered[filtered["pos_after"] == 1]
+        
 
         plt.figure(figsize=(14, 7))
         sns.boxplot(data=filtered, x="change_type", y="position_change", palette="Set2")
@@ -302,13 +300,11 @@ elif tabs == "Pit Stop Insights":
         if selected_team != "All Teams" and "team_name" in filtered.columns:
             filtered = filtered[filtered["team_name"] == selected_team]
 
-        show_winner_only = st.checkbox("Show Winners Only", value=False)
-        if show_winner_only and "position" in filtered.columns:
-            filtered = filtered[filtered["position"] == 1]
+        
 
         if "pit_duration" in filtered.columns:
             fig = px.box(
-                filtered,
+                filtered[filtered['pit_duration'] < 500],
                 x="team_name",
                 y="pit_duration",
                 color="team_name",
